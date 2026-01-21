@@ -20,7 +20,14 @@ public class SimAprilTag implements AprilTagIO {
     private final int id;
     private final double fieldX;
     private final double fieldY;
+    private final double orientationRad;  // tambah orientasi tag
     private final AtomicBoolean visible = new AtomicBoolean(true);
+    
+    // Camera FOV and range limits for realistic simulation (Logitech C270)
+    private static final double CAMERA_FOV_RAD = Math.toRadians(55.0);  // 55 degree FOV (C270 actual)
+    private static final double MAX_RANGE_INCH = 120.0;  // 120 inch max detection (C270 limited)
+    private static final double MAX_YAW_RAD = Math.toRadians(27.5);  // 27.5 degree max yaw (half FOV)
+    private static final double CAMERA_HEIGHT_INCH = 16.0;  // 16 inch height
 
     // Measured values updated each tick
     private volatile double measuredYawRad = 0.0;   // relative to robot heading
@@ -31,9 +38,14 @@ public class SimAprilTag implements AprilTagIO {
     private volatile double yawBiasRad = 0.0;
 
     public SimAprilTag(int id, double fieldXInches, double fieldYInches) {
+        this(id, fieldXInches, fieldYInches, 0.0);
+    }
+    
+    public SimAprilTag(int id, double fieldXInches, double fieldYInches, double orientationRadians) {
         this.id = id;
         this.fieldX = fieldXInches;
         this.fieldY = fieldYInches;
+        this.orientationRad = orientationRadians;
     }
 
     public int getId() {
@@ -46,6 +58,10 @@ public class SimAprilTag implements AprilTagIO {
 
     public double getFieldY() {
         return fieldY;
+    }
+    
+    public double getOrientation() {
+        return orientationRad;
     }
 
     public void setVisible(boolean v) {
@@ -79,7 +95,7 @@ public class SimAprilTag implements AprilTagIO {
     }
 
     /**
-     * Compute current tag measurement relative to robot pose.
+     * Compute current tag measurement relative to robot pose with realistic camera limitations.
      */
     public TagPose computePose(double robotX, double robotY, double robotHeadingRad) {
         double dx = fieldX - robotX;
@@ -87,9 +103,30 @@ public class SimAprilTag implements AprilTagIO {
         double range = Math.hypot(dx, dy);
         double absoluteBearing = Math.atan2(dy, dx);
         double yawRel = normalize(absoluteBearing - robotHeadingRad + yawBiasRad);
-        boolean vis = visible.get();
+        
+        // Apply realistic camera limitations with height compensation
+        // AprilTag height in FTC CenterStage: 23 inches from floor (pylon top)
+        double tagHeight = 23.0;
+        double heightDiff = tagHeight - CAMERA_HEIGHT_INCH;
+        double horizontalDistance = range;
+        double verticalDistance = heightDiff;
+        
+        // Calculate pitch angle (vertical angle from camera to tag)
+        double pitchAngle = Math.atan2(verticalDistance, horizontalDistance);
+        
+        // Camera vertical FOV limit (typically 30-40 degrees total)
+        double maxPitchAngle = Math.toRadians(20.0);  // 20 degrees up from horizontal
+        
+        // Calculate actual 3D distance for range checking
+        double adjustedRange = Math.sqrt(horizontalDistance * horizontalDistance + verticalDistance * verticalDistance);
+        
+        // Check visibility with pitch angle constraint
+        boolean vis = visible.get() && 
+                     adjustedRange <= MAX_RANGE_INCH && 
+                     Math.abs(yawRel) <= MAX_YAW_RAD &&
+                     pitchAngle <= maxPitchAngle;  // Must be able to look up at the tag
 
-        measuredRangeIn = range;
+        measuredRangeIn = range;  // Keep floor distance for driving
         measuredYawRad = yawRel;
         lastPose = new TagPose(fieldX, fieldY, yawRel, range, vis);
         return lastPose;

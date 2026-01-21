@@ -52,8 +52,8 @@ public class SimDrive implements DriveIO {
 
     @Override
     public void rotate(double degrees, double power) {
-        remainingAngleRad = Math.toRadians(degrees);
-        rotateSpeed = Math.copySign(Math.abs(power) * Math.toRadians(180.0), degrees);
+        remainingAngleRad = Math.toRadians(-degrees);  // Reverse untuk FTC convention
+        rotateSpeed = Math.copySign(Math.abs(power) * Math.toRadians(180.0), -degrees);
         mode = Mode.ROTATE;
     }
 

@@ -2,8 +2,7 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.image.BufferedImage;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.List;
 import javax.imageio.ImageIO;
@@ -13,15 +12,15 @@ public class SimulatorWindow extends JFrame {
     private static final String DEFAULT_FIELD_PATH = "S:\\\\FTC\\\\simulation\\\\field\\\\Screenshot 2026-01-09 144014.png";
     private final SimDrive drive = new SimDrive();
     // Default official FTC field AprilTag layout (Centerstage style, origin = field center, +x audience right, +y away from audience)
-    private final SimAprilTag tag1 = new SimAprilTag(1, -35.5, -72.0);
-    private final SimAprilTag tag2 = new SimAprilTag(2, 0.0, -72.0);
-    private final SimAprilTag tag3 = new SimAprilTag(3, 35.5, -72.0);
-    private final SimAprilTag tag4 = new SimAprilTag(4, -35.5, 72.0);
+    // private final SimAprilTag tag1 = new SimAprilTag(1, -60.5, -72.0);
+    // private final SimAprilTag tag2 = new SimAprilTag(2, 0.0, -72.0);  // DIHAPUS (hijau bawah)
+    // private final SimAprilTag tag3 = new SimAprilTag(3, 60.5, -72.0);
+    private final SimAprilTag tag4 = new SimAprilTag(4, -60.5, 62.0, Math.toRadians(45));  // rotasi 45 derajat
     private final SimAprilTag tag5 = new SimAprilTag(5, 0.0, 72.0);
-    private final SimAprilTag tag6 = new SimAprilTag(6, 35.5, 72.0);
+    private final SimAprilTag tag6 = new SimAprilTag(6, 60.5, 62.0, Math.toRadians(-30));  // rotasi -30 derajat
     // Legacy aliases to keep existing auto logic unchanged (uses two tags)
-    private final SimAprilTag tag21 = tag2;
-    private final SimAprilTag tag24 = tag5;
+    private final SimAprilTag tag21 = tag5;  // tag5 di atas (y=72.0)
+    private final SimAprilTag tag24 = tag6;  // tag24 pindah ke tag4 (kiri atas)
     private SimAprilTag controlTag = tag21;
 
     private final AutoLogic autoLogic = new AutoLogic();
@@ -30,16 +29,18 @@ public class SimulatorWindow extends JFrame {
 
     private final List<double[]> trail = new ArrayList<>();
     private final List<String> recentTransitions = new ArrayList<>();
+    private final List<SavedPosition> savedPositions = new ArrayList<>();
     private final Timer timer;
     private double currentScale = 5.0; // pixels per inch, recalculated to fit field
     private final FieldPanel fieldPanel = new FieldPanel();
     private final JPanel controlPanel = new JPanel();
     private final JPanel infoPanel = new JPanel();
-    private final JTextField startXField = new JTextField("-12", 4);
-    private final JTextField startYField = new JTextField("-60", 4);
-    private final JTextField startHeadingField = new JTextField("90", 4);
+    private final JTextField startXField = new JTextField("15", 4);
+    private final JTextField startYField = new JTextField("-55", 4);
+    private final JTextField startHeadingField = new JTextField("45", 4);
     private final JTextArea hudArea = new JTextArea();
     private BufferedImage fieldImage = null;
+    private final JComboBox<SavedPosition> positionComboBox = new JComboBox<>();
     private void loadDefaultFieldImage() {
         try {
             fieldImage = ImageIO.read(new File(DEFAULT_FIELD_PATH));
@@ -52,9 +53,9 @@ public class SimulatorWindow extends JFrame {
     public SimulatorWindow() {
         super("FTC Autonomous Simulator");
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
-        setSize(1120, 860);
-        setMinimumSize(new Dimension(1120, 860));
-        setMaximumSize(new Dimension(1120, 860));
+        setSize(1120, 900);
+        setMinimumSize(new Dimension(1120, 900));
+        setMaximumSize(new Dimension(1120, 900));
         setResizable(false);
         setLocationRelativeTo(null);
         setBackground(Color.BLACK);
@@ -64,6 +65,7 @@ public class SimulatorWindow extends JFrame {
         add(infoPanel, BorderLayout.EAST);
 
         loadDefaultFieldImage();
+        loadSavedPositions();
         buildControls();
         buildInfoPanel();
         applyStartPose(); // initialize robot pose from defaults
@@ -171,24 +173,27 @@ public class SimulatorWindow extends JFrame {
     }
 
     private void buildControls() {
-        controlPanel.setLayout(new FlowLayout(FlowLayout.LEFT));
-        controlPanel.add(new JLabel("Start X (in):"));
-        controlPanel.add(startXField);
-        controlPanel.add(new JLabel("Start Y (in):"));
-        controlPanel.add(startYField);
-        controlPanel.add(new JLabel("Heading (deg):"));
-        controlPanel.add(startHeadingField);
+        controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.Y_AXIS));
+        
+        // First row - Start position controls
+        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row1.add(new JLabel("Start X (in):"));
+        row1.add(startXField);
+        row1.add(new JLabel("Start Y (in):"));
+        row1.add(startYField);
+        row1.add(new JLabel("Heading (deg):"));
+        row1.add(startHeadingField);
 
         JButton spawnBtn = new JButton("Set Pose");
         spawnBtn.addActionListener(e -> applyStartPose());
-        controlPanel.add(spawnBtn);
+        row1.add(spawnBtn);
 
         JButton resetTrailBtn = new JButton("Reset Trail");
         resetTrailBtn.addActionListener(e -> {
             trail.clear();
             repaint();
         });
-        controlPanel.add(resetTrailBtn);
+        row1.add(resetTrailBtn);
 
         JButton loadFieldBtn = new JButton("Load Field Image");
         loadFieldBtn.addActionListener(e -> {
@@ -203,7 +208,27 @@ public class SimulatorWindow extends JFrame {
                 }
             }
         });
-        controlPanel.add(loadFieldBtn);
+        row1.add(loadFieldBtn);
+        controlPanel.add(row1);
+        
+        // Second row - Saved positions controls
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row2.add(new JLabel("Saved Positions:"));
+        row2.add(positionComboBox);
+        
+        JButton savePosBtn = new JButton("Save");
+        savePosBtn.addActionListener(e -> saveCurrentPosition());
+        row2.add(savePosBtn);
+        
+        JButton loadPosBtn = new JButton("Load");
+        loadPosBtn.addActionListener(e -> loadSelectedPosition());
+        row2.add(loadPosBtn);
+        
+        JButton deletePosBtn = new JButton("Delete");
+        deletePosBtn.addActionListener(e -> deleteSelectedPosition());
+        row2.add(deletePosBtn);
+        
+        controlPanel.add(row2);
     }
 
     private void buildInfoPanel() {
@@ -293,9 +318,9 @@ public class SimulatorWindow extends JFrame {
     }
 
     private void drawTags(Graphics2D g2) {
-        drawTag(g2, tag1, new Color(70, 180, 255));
-        drawTag(g2, tag2, new Color(80, 200, 140));
-        drawTag(g2, tag3, new Color(200, 160, 90));
+        // drawTag(g2, tag1, new Color(70, 180, 255));
+        // drawTag(g2, tag2, new Color(80, 200, 140));  // DIHAPUS (hijau bawah)
+        // drawTag(g2, tag3, new Color(200, 160, 90));
         drawTag(g2, tag4, new Color(255, 120, 120));
         drawTag(g2, tag5, new Color(160, 120, 255));
         drawTag(g2, tag6, new Color(220, 200, 120));
@@ -305,16 +330,20 @@ public class SimulatorWindow extends JFrame {
         SimDrive.Pose pose = drive.getPose();
         SimAprilTag.TagPose tp = tag.computePose(pose.x, pose.y, pose.headingRad);
         int size = (int) (6 * currentScale);
-        int x = toScreenX(tp.x) - size / 2;
-        int y = toScreenY(tp.y) - size / 2;
-        g2.setColor(tp.visible ? color : new Color(color.getRed(), color.getGreen(), color.getBlue(), 80));
-        g2.fillRect(x, y, size, size);
-        g2.setColor(Color.WHITE);
-        g2.drawRect(x, y, size, size);
-
-        double yawGlobal = pose.headingRad + tag.yaw();
         int cx = toScreenX(tp.x);
         int cy = toScreenY(tp.y);
+        
+        // Gambar tag yang terotasi
+        Graphics2D g2d = (Graphics2D) g2.create();
+        g2d.translate(cx, cy);
+        g2d.rotate(tag.getOrientation());  // Rotasi sesuai orientasi tag
+        g2d.setColor(tp.visible ? color : new Color(color.getRed(), color.getGreen(), color.getBlue(), 80));
+        g2d.fillRect(-size/2, -size/2, size, size);
+        g2d.setColor(Color.WHITE);
+        g2d.drawRect(-size/2, -size/2, size, size);
+        g2d.dispose();
+
+        double yawGlobal = pose.headingRad + tag.yaw();
         int arrowLen = (int) (8 * currentScale);
         int ex = cx + (int) (Math.cos(yawGlobal) * arrowLen);
         int ey = cy - (int) (Math.sin(yawGlobal) * arrowLen);
@@ -372,5 +401,70 @@ public class SimulatorWindow extends JFrame {
 
     private int toScreenY(double yInches) {
         return (int) (fieldPanel.getHeight() / 2 - yInches * currentScale);
+    }
+
+    private void saveCurrentPosition() {
+        SimDrive.Pose p = drive.getPose();
+        String name = JOptionPane.showInputDialog(this, "Enter position name:", "Save Position", JOptionPane.QUESTION_MESSAGE);
+        if (name != null && !name.trim().isEmpty()) {
+            SavedPosition pos = new SavedPosition(name.trim(), p.x, p.y, Math.toDegrees(p.headingRad));
+            savedPositions.add(pos);
+            positionComboBox.addItem(pos);
+            savePositionsToFile();
+            JOptionPane.showMessageDialog(this, "Position saved: " + pos, "Success", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private void loadSelectedPosition() {
+        SavedPosition selected = (SavedPosition) positionComboBox.getSelectedItem();
+        if (selected != null) {
+            drive.setPose(selected.getX(), selected.getY(), Math.toRadians(selected.getHeading()));
+            startXField.setText(String.format("%.1f", selected.getX()));
+            startYField.setText(String.format("%.1f", selected.getY()));
+            startHeadingField.setText(String.format("%.1f", selected.getHeading()));
+            trail.clear();
+            autoLogic.reset();
+            repaint();
+            JOptionPane.showMessageDialog(this, "Position loaded: " + selected, "Success", JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
+    private void deleteSelectedPosition() {
+        SavedPosition selected = (SavedPosition) positionComboBox.getSelectedItem();
+        if (selected != null) {
+            int result = JOptionPane.showConfirmDialog(this, "Delete position: " + selected.getName() + "?", "Confirm Delete", JOptionPane.YES_NO_OPTION);
+            if (result == JOptionPane.YES_OPTION) {
+                savedPositions.remove(selected);
+                positionComboBox.removeItem(selected);
+                savePositionsToFile();
+                JOptionPane.showMessageDialog(this, "Position deleted", "Success", JOptionPane.INFORMATION_MESSAGE);
+            }
+        }
+    }
+
+    private void loadSavedPositions() {
+        File file = new File("saved_positions.dat");
+        if (file.exists()) {
+            try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
+                @SuppressWarnings("unchecked")
+                List<SavedPosition> loaded = (List<SavedPosition>) ois.readObject();
+                savedPositions.clear();
+                positionComboBox.removeAllItems();
+                for (SavedPosition pos : loaded) {
+                    savedPositions.add(pos);
+                    positionComboBox.addItem(pos);
+                }
+            } catch (IOException | ClassNotFoundException ex) {
+                System.err.println("Failed to load saved positions: " + ex.getMessage());
+            }
+        }
+    }
+
+    private void savePositionsToFile() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("saved_positions.dat"))) {
+            oos.writeObject(savedPositions);
+        } catch (IOException ex) {
+            System.err.println("Failed to save positions: " + ex.getMessage());
+        }
     }
 }
