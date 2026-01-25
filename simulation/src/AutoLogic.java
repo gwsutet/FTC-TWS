@@ -9,7 +9,7 @@ public class AutoLogic {
     private double actionTimer = 0.0;
     private Runnable onActionComplete = null;
     private boolean sleepActive = false;
-    private double sleepTimer = 0.0;  
+    private double sleepTimer = 0.0;
     private Runnable onSleepComplete = null;
 
     // Initial position settings
@@ -65,7 +65,7 @@ public class AutoLogic {
         }
     }
 
-    public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag24, DriveIO drive) {
+    public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag20, DriveIO drive) {
         if (actionActive) {
             actionTimer -= dtSeconds;
             if (actionTimer <= 0) {
@@ -103,7 +103,7 @@ public class AutoLogic {
                     // Ngehadap ke tag21 dulu
                     double yawError = tag21.yaw();
                     if (Math.abs(yawError) > Math.toRadians(5)) {
-                        drive.tank(-0.25, 0.25);  // Putar counter-clockwise (kiri) untuk ngehadap tag
+                        drive.tank(0.25, -0.25);  // Putar clockwise (kanan) untuk ngehadap tag
                     } else {
                         drive.tank(0, 0);  // Stop kalo udah ngehadek
                         double rangeError = tag21.range() - 60.0;  // Minimal 24 inch dari tag21
@@ -114,34 +114,34 @@ public class AutoLogic {
                         }
                     }
                 } else {
-                    drive.tank(-0.18, 0.18);  // Putar counter-clockwise (kiri) cari tag
+                    drive.tank(0.18, -0.18);  // Putar clockwise (kanan) cari tag
                 }
                 break;
 
             case SEARCH_SHOOTER:
-                if (tag24 != null && tag24.isVisible()) {
-                    // Ngehadap ke tag24 dulu
-                    double yawError = tag24.yaw();
+                if (tag20 != null && tag20.isVisible()) {
+                    // Ngehadap ke tag20 dulu
+                    double yawError = tag20.yaw();
                     if (Math.abs(yawError) > Math.toRadians(5)) {
-                        drive.tank(0.3, -0.3);  // Putar counter-clockwise (kiri) untuk ngehadap tag
+                        drive.tank(-0.3, 0.3);  // Putar clockwise (kanan) untuk ngehadap tag
                     } else {
                         drive.tank(0, 0);  // Stop kalo udah ngehadek
                         currentState = AutoState.LOCK_SHOOTER;
                     }
                 } else {
-                    drive.tank(0.18, -0.18);  // Putar clockwise (kanan) cari tag
+                    drive.tank(-0.18, 0.18);  // Putar counter-clockwise (kiri) cari tag
                 }
                 break;
 
             case LOCK_SHOOTER:
-                if (tag24 != null && tag24.isVisible()) {
+                if (tag20 != null && tag20.isVisible()) {
                     // Cek yaw alignment dulu
-                    double yawError = tag24.yaw();
+                    double yawError = tag20.yaw();
                     if (Math.abs(yawError) > Math.toRadians(3)) {
-                        drive.tank(0.25, -0.25);  // Putar counter-clockwise (kiri) halus untuk alignment
+                        drive.tank(-0.25, 0.25);  // Putar clockwise (kanan) halus untuk alignment
                     } else {
                         // Udah ngehadek, cek range
-                        double rangeError = tag24.range() - 68.0;
+                        double rangeError = tag20.range() - 68.0;
                         if (Math.abs(rangeError) > distanceTolerance) {
                             startDriveAction(rangeError, 0.9, drive, null);
                         } else {
@@ -150,13 +150,13 @@ public class AutoLogic {
                         }
                     }
                 } else {
-                    System.out.println("LOCK_SHOOTER -> SEARCH_SHOOTER (tag24 lost)");
+                    System.out.println("LOCK_SHOOTER -> SEARCH_SHOOTER (tag20 lost)");
                     currentState = AutoState.SEARCH_SHOOTER;
                 }
                 break;
 
             case TURN_BACK:
-                startRotateAction(-180.0, 0.9, drive, () -> currentState = AutoState.SHOOTING);
+                startRotateAction(180.0, 0.9, drive, () -> currentState = AutoState.SHOOTING);
                 break;
 
             case SHOOTING:
@@ -170,14 +170,9 @@ public class AutoLogic {
     }
 
     private void startInitialSequence(DriveIO drive) {
-        startDriveAction(-80.0, 0.9, drive, 
-         () -> startRotateAction(-90.0, 1.0, drive, 
-            () -> startDriveAction(-90.0, 0.9, drive, 
-                () -> currentState = AutoState.SCAN_CENTER)));
-
-        // startRotateAction(-40.0, 1.0, drive,
-        //         () -> startDriveAction(40.0, 0.9, drive,
-        //                 () -> currentState = AutoState.SCAN_CENTER));
+        startRotateAction(40.0, 1.0, drive,
+                () -> startDriveAction(40.0, 0.9, drive,
+                        () -> currentState = AutoState.SCAN_CENTER));
     }
 
     private void startCollectSequence(DriveIO drive) {
@@ -187,9 +182,9 @@ public class AutoLogic {
         // if (ballBatchCount >= 3) driveDist = 80.0;
 
         final double distFinal = driveDist;
-        Runnable step8 = () -> startRotateAction(45.0, 1.0, drive, () -> currentState = AutoState.SEARCH_SHOOTER);
+        Runnable step8 = () -> startRotateAction(-45.0, 1.0, drive, () -> currentState = AutoState.SEARCH_SHOOTER);
         Runnable step7 = () -> startDriveAction(distFinal, 0.8, drive, step8);
-        Runnable step6 = () -> startRotateAction(-180.0, 1.0, drive, step7);
+        Runnable step6 = () -> startRotateAction(180.0, 1.0, drive, step7);
         Runnable step5 = () -> startDriveAction(-120.0, 0.8, drive, step6);
         Runnable step4 = () -> {
             drive.collect(ballBatchCount);
@@ -202,9 +197,9 @@ public class AutoLogic {
                 });
             });
         };
-        Runnable step3 = () -> startRotateAction(-180.0, 1.0, drive, step4);
+        Runnable step3 = () -> startRotateAction(180.0, 1.0, drive, step4);
         Runnable step2 = () -> startDriveAction(distFinal, 0.8, drive, step3);
-        Runnable step1 = () -> startRotateAction(-79.2, 1.0, drive, step2);
+        Runnable step1 = () -> startRotateAction(79.2, 1.0, drive, step2);
 
         startDriveAction(0.0, 0.3, drive, step1);
     }

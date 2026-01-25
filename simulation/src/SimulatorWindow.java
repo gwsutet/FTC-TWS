@@ -21,6 +21,7 @@ public class SimulatorWindow extends JFrame {
     // Legacy aliases to keep existing auto logic unchanged (uses two tags)
     private final SimAprilTag tag21 = tag5;  // tag5 di atas (y=72.0)
     private final SimAprilTag tag24 = tag6;  // tag24 pindah ke tag4 (kiri atas)
+    private final SimAprilTag tag20 = tag4;  // tag20 sebagai alias ke tag4
     private SimAprilTag controlTag = tag21;
 
     private final AutoLogic autoLogic = new AutoLogic();
@@ -115,6 +116,16 @@ public class SimulatorWindow extends JFrame {
             }
         });
 
+        im.put(KeyStroke.getKeyStroke("3"), "toggleTag20");
+        am.put("toggleTag20", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                tag20.toggleVisible();
+                controlTag = tag20;
+                repaint();
+            }
+        });
+
         im.put(KeyStroke.getKeyStroke("Q"), "yawLeft");
         am.put("yawLeft", new AbstractAction() {
             @Override
@@ -155,7 +166,7 @@ public class SimulatorWindow extends JFrame {
     private void tick(ActionEvent e) {
         double dt = 0.02;
         if (autoEnabled) {
-            autoLogic.update(dt, tag21, tag24, drive);
+            autoLogic.update(dt, tag21, tag20, drive);
         }
         drive.update(dt);
         SimDrive.Pose p = drive.getPose();
@@ -387,7 +398,8 @@ public class SimulatorWindow extends JFrame {
         sb.append(String.format("Pose: x=%.1f in, y=%.1f in, heading=%.1f deg\n", p.x, p.y, Math.toDegrees(p.headingRad)));
         sb.append(String.format("Tag21 vis=%s yaw=%.2f rad r=%.1f\n", tag21.isVisible(), tag21.yaw(), tag21.range()));
         sb.append(String.format("Tag24 vis=%s yaw=%.2f rad r=%.1f\n", tag24.isVisible(), tag24.yaw(), tag24.range()));
-        sb.append("Controls: ENTER auto | 1 Tag21 | 2 Tag24 | Q/E yaw | W/S range | Set Pose button\n");
+        sb.append(String.format("Tag20 vis=%s yaw=%.2f rad r=%.1f\n", tag20.isVisible(), tag20.yaw(), tag20.range()));
+        sb.append("Controls: ENTER auto | 1 Tag21 | 2 Tag24 | 3 Tag20 | Q/E yaw | W/S range | Set Pose button\n");
         sb.append("\nRecent state transitions:\n");
         for (String s : recentTransitions) {
             sb.append(s).append("\n");
