@@ -9,7 +9,7 @@ public class AutoLogic {
     private double actionTimer = 0.0;
     private Runnable onActionComplete = null;
     private boolean sleepActive = false;
-    private double sleepTimer = 0.0;
+    private double sleepTimer = 0.0;  
     private Runnable onSleepComplete = null;
 
     // Initial position settings
