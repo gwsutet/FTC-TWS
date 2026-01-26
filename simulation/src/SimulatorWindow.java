@@ -166,7 +166,7 @@ public class SimulatorWindow extends JFrame {
     private void tick(ActionEvent e) {
         double dt = 0.02;
         if (autoEnabled) {
-            autoLogic.update(dt, tag21, tag20, drive);
+            autoLogic.update(dt, tag21, tag20, tag24, drive);
         }
         drive.update(dt);
         SimDrive.Pose p = drive.getPose();

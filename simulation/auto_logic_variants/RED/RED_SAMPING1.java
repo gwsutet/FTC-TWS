@@ -11,6 +11,9 @@ public class AutoLogic {
     private boolean sleepActive = false;
     private double sleepTimer = 0.0;
     private Runnable onSleepComplete = null;
+    
+    // Dynamic shooting target based on scan
+    private AprilTagIO shootingTarget = null;
 
     // Initial position settings
     private double initialX = 5.0;  // Starting X position
@@ -36,6 +39,7 @@ public class AutoLogic {
         sleepActive = false;
         sleepTimer = 0.0;
         onSleepComplete = null;
+        shootingTarget = null;
     }
 
     // Set initial position for simulation
@@ -65,7 +69,7 @@ public class AutoLogic {
         }
     }
 
-    public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag24, DriveIO drive) {
+    public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag20, AprilTagIO tag24, DriveIO drive) {
         if (actionActive) {
             actionTimer -= dtSeconds;
             if (actionTimer <= 0) {
@@ -119,9 +123,18 @@ public class AutoLogic {
                 break;
 
             case SEARCH_SHOOTER:
+                // Cari tag24 atau tag20, yang pertama ketemu itu jadi target
                 if (tag24 != null && tag24.isVisible()) {
-                    // Ngehadap ke tag24 dulu
-                    double yawError = tag24.yaw();
+                    shootingTarget = tag24;
+                    System.out.println("RED Found tag24, using as shooting target");
+                } else if (tag20 != null && tag20.isVisible()) {
+                    shootingTarget = tag20;
+                    System.out.println("RED Found tag20, using as shooting target");
+                }
+                
+                if (shootingTarget != null && shootingTarget.isVisible()) {
+                    // Ngehadap ke target yang ditemukan
+                    double yawError = shootingTarget.yaw();
                     if (Math.abs(yawError) > Math.toRadians(5)) {
                         drive.tank(0.3, -0.3);  // Putar counter-clockwise (kiri) untuk ngehadap tag
                     } else {
@@ -134,23 +147,24 @@ public class AutoLogic {
                 break;
 
             case LOCK_SHOOTER:
-                if (tag24 != null && tag24.isVisible()) {
+                if (shootingTarget != null && shootingTarget.isVisible()) {
                     // Cek yaw alignment dulu
-                    double yawError = tag24.yaw();
+                    double yawError = shootingTarget.yaw();
                     if (Math.abs(yawError) > Math.toRadians(3)) {
                         drive.tank(0.25, -0.25);  // Putar counter-clockwise (kiri) halus untuk alignment
                     } else {
                         // Udah ngehadek, cek range
-                        double rangeError = tag24.range() - 68.0;
+                        double rangeError = shootingTarget.range() - 68.0;
                         if (Math.abs(rangeError) > distanceTolerance) {
                             startDriveAction(rangeError, 0.9, drive, null);
                         } else {
-                            System.out.println("LOCK_SHOOTER -> TURN_BACK (range OK)");
+                            System.out.println("RED LOCK_SHOOTER -> TURN_BACK (range OK)");
                             currentState = AutoState.TURN_BACK;
                         }
                     }
                 } else {
-                    System.out.println("LOCK_SHOOTER -> SEARCH_SHOOTER (tag24 lost)");
+                    System.out.println("RED LOCK_SHOOTER -> SEARCH_SHOOTER (target lost)");
+                    shootingTarget = null;  // Reset target
                     currentState = AutoState.SEARCH_SHOOTER;
                 }
                 break;

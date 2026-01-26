@@ -170,8 +170,8 @@ public class AutoLogic {
     }
 
     private void startInitialSequence(DriveIO drive) {
-        startRotateAction(40.0, 1.0, drive,
-                () -> startDriveAction(40.0, 0.9, drive,
+        startRotateAction(10.0, 1.0, drive,
+                () -> startDriveAction(80.0, 0.9, drive,
                         () -> currentState = AutoState.SCAN_CENTER));
     }
 
