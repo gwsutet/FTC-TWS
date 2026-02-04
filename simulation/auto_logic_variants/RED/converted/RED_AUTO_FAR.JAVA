@@ -1,245 +1,319 @@
-public class AutoLogic {
-    public enum AutoState { IDLE, SCAN_CENTER, SEARCH_SHOOTER, LOCK_SHOOTER, TURN_BACK, SHOOTING, COLLECT_BALLS }
+package org.firstinspires.ftc.teamcode;
+
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx;
+import com.qualcomm.robotcore.hardware.Servo;
+import com.qualcomm.robotcore.util.Range;
+
+import org.firstinspires.ftc.robotcore.external.hardware.camera.WebcamName;
+import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.ExposureControl;
+import org.firstinspires.ftc.robotcore.external.hardware.camera.controls.GainControl;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.Position;
+import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
+import org.firstinspires.ftc.vision.VisionPortal;
+import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
+import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
+
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+@Autonomous(name = "AutoLogic Real - Red Far", group = "Red")
+public class RED_AUTO_FAR extends LinearOpMode {
+
+    enum AutoState { IDLE, SCAN_CENTER, SEARCH_SHOOTER, LOCK_SHOOTER, TURN_BACK, SHOOTING, COLLECT_BALLS }
 
     private AutoState currentState = AutoState.IDLE;
     private int ballBatchCount = 0;
-    private boolean hasStarted = false;
 
-    private boolean actionActive = false;
-    private double actionTimer = 0.0;
-    private Runnable onActionComplete = null;
-    private boolean sleepActive = false;
-    private double sleepTimer = 0.0;
-    private Runnable onSleepComplete = null;
+    private DcMotor leftDrive, rightDrive, intakeDrive;
+    private DcMotorEx shooter;
+    private Servo feeder, angle;
+    private AprilTagProcessor aprilTag;
+    private VisionPortal visionPortal;
 
-    // Initial position settings
-    private double initialX = 5.0;  // Starting X position
-    private double initialY = -55.0;  // Starting Y position
-    private double initialHeading = 45.0;  // Starting heading in degrees
-    private boolean useInitialPosition = false;  // Toggle for initial position
+    static final double TRACK_WIDTH_INCH = 16.0;
+    static final double TICKS_PER_REV = 420;
+    static final double WHEEL_DIAMETER_INCH = 3.543;
+    static final double TICKS_PER_INCH = TICKS_PER_REV / (Math.PI * WHEEL_DIAMETER_INCH);
+    static final double TICKS_PER_DEGREE = (TRACK_WIDTH_INCH * Math.PI * TICKS_PER_INCH) / 360.0;
 
-    private final double linearSpeedInPerSec = 100.0;  // simulated max speed
-    private final double angularSpeedDegPerSec = 360.0;
-    private final double distanceTolerance = 1.0;
+    static final double GEAR_RATIO = 15.0 / 10.0;
+    static final double SHOOTER_TICKS_PER_REV = 28;
+    static final double DISTANCE_TOLERANCE = 1.0;
 
-    public AutoState getCurrentState() {
-        return currentState;
-    }
+    @Override
+    public void runOpMode() {
+        initHardware();
+        initAprilTag();
+        telemetry.update();
 
-    public void reset() {
-        currentState = AutoState.IDLE;
-        ballBatchCount = 0;
-        hasStarted = false;
-        actionActive = false;
-        actionTimer = 0.0;
-        onActionComplete = null;
-        sleepActive = false;
-        sleepTimer = 0.0;
-        onSleepComplete = null;
-    }
+        waitForStart();
 
-    // Set initial position for simulation
-    public void setInitialPosition(double x, double y, double heading) {
-        this.initialX = x;
-        this.initialY = y;
-        this.initialHeading = heading;
-        this.useInitialPosition = true;
-    }
+        while (opModeIsActive()) {
+            AprilTagDetection tag21 = getSpecificTag(21);
+            AprilTagDetection tag24 = getSpecificTag(24);
 
-    // Enable/disable initial position
-    public void setUseInitialPosition(boolean use) {
-        this.useInitialPosition = use;
-    }
-
-    // Get initial position info
-    public double getInitialX() { return initialX; }
-    public double getInitialY() { return initialY; }
-    public double getInitialHeading() { return initialHeading; }
-    public boolean getUseInitialPosition() { return useInitialPosition; }
-
-    // Set position if DriveIO supports it
-    private void setRobotPosition(DriveIO drive) {
-        if (useInitialPosition && drive instanceof SimDrive) {
-            SimDrive simDrive = (SimDrive) drive;
-            simDrive.setPose(initialX, initialY, Math.toRadians(initialHeading));
-        }
-    }
-
-    public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag20, DriveIO drive) {
-        if (actionActive) {
-            actionTimer -= dtSeconds;
-            if (actionTimer <= 0) {
-                actionActive = false;
-                if (onActionComplete != null) onActionComplete.run();
+            if (gamepad1.left_bumper) {
+                runAutoLogic(tag21, tag24);
+            } else {
+                currentState = AutoState.IDLE;
+                stopDrive();
+                runManualControl();
             }
-            return;
-        }
 
-        if (sleepActive) {
-            sleepTimer -= dtSeconds;
-            // Stop semua movement saat sleep
-            drive.tank(0, 0);
-            if (sleepTimer <= 0) {
-                sleepActive = false;
-                if (onSleepComplete != null) {
-                    onSleepComplete.run();
-                    onSleepComplete = null; // Clear setelah dipanggil
-                }
-            }
-            return;
+            displayTelemetry(tag21, tag24);
         }
+    }
+
+    void runAutoLogic(AprilTagDetection tag21, AprilTagDetection tag24) {
+        AprilTagDetection tag22 = getSpecificTag(22);
+        AprilTagDetection tag23 = getSpecificTag(23);
+        AprilTagDetection centerTag = getCenterTag(tag21, tag22, tag23);
 
         switch (currentState) {
             case IDLE:
-                if (!hasStarted) {
-                    hasStarted = true;
-                    setRobotPosition(drive);  // Set initial position
-                    startInitialSequence(drive);
-                }
+                angle.setPosition(0.4);
+                feeder.setPosition(0.0);  
+                rotateExactFast(-40.0, 1.0);
+                driveStraight(0.9, 40.0);
+                currentState = AutoState.SCAN_CENTER;
                 break;
 
             case SCAN_CENTER:
-                if (tag21 != null && tag21.isVisible()) {
-                    // Ngehadap ke tag21 dulu
-                    double yawError = tag21.yaw();
-                    if (Math.abs(yawError) > Math.toRadians(5)) {
-                        drive.tank(0.25, -0.25);  // Putar clockwise (kanan) untuk ngehadap tag
+                if (centerTag != null) {
+                    double yawError = centerTag.ftcPose.bearing;
+                    if (Math.abs(yawError) > 5.0) {
+                        setDrivePower(-0.25, 0.25);
                     } else {
-                        drive.tank(0, 0);  // Stop kalo udah ngehadek
-                        double rangeError = tag21.range() - 60.0;  // Minimal 24 inch dari tag21
-                        if (Math.abs(rangeError) > distanceTolerance) {
-                            startDriveAction(rangeError, 0.9, drive, null);
+                        stopDrive();
+                        double rangeError = centerTag.ftcPose.range - 60.0;
+                        if (Math.abs(rangeError) > DISTANCE_TOLERANCE) {
+                            driveStraight(0.9, rangeError);
                         } else {
                             currentState = AutoState.SEARCH_SHOOTER;
                         }
                     }
                 } else {
-                    drive.tank(0.18, -0.18);  // Putar clockwise (kanan) cari tag
+                    setDrivePower(-0.18, 0.18);
                 }
                 break;
 
             case SEARCH_SHOOTER:
-                if (tag20 != null && tag20.isVisible()) {
-                    // Ngehadap ke tag20 dulu
-                    double yawError = tag20.yaw();
-                    if (Math.abs(yawError) > Math.toRadians(5)) {
-                        drive.tank(-0.3, 0.3);  // Putar clockwise (kanan) untuk ngehadap tag
+                if (tag24 != null) {
+                    double yawError = tag24.ftcPose.bearing;
+                    if (Math.abs(yawError) > 5.0) {
+                        setDrivePower(0.3, -0.3);
                     } else {
-                        drive.tank(0, 0);  // Stop kalo udah ngehadek
+                        stopDrive();
                         currentState = AutoState.LOCK_SHOOTER;
                     }
                 } else {
-                    drive.tank(-0.18, 0.18);  // Putar counter-clockwise (kiri) cari tag
+                    setDrivePower(0.18, -0.18);
                 }
                 break;
 
             case LOCK_SHOOTER:
-                if (tag20 != null && tag20.isVisible()) {
-                    // Cek yaw alignment dulu
-                    double yawError = tag20.yaw();
-                    if (Math.abs(yawError) > Math.toRadians(3)) {
-                        drive.tank(-0.25, 0.25);  // Putar clockwise (kanan) halus untuk alignment
+                if (tag24 != null) {
+                    double yawError = tag24.ftcPose.bearing;
+                    if (Math.abs(yawError) > 3.0) {
+                        setDrivePower(0.25, -0.25);
                     } else {
-                        // Udah ngehadek, cek range
-                        double rangeError = tag20.range() - 68.0;
-                        if (Math.abs(rangeError) > distanceTolerance) {
-                            startDriveAction(rangeError, 0.9, drive, null);
+                        double rangeError = tag24.ftcPose.range - 68.0;
+                        if (Math.abs(rangeError) > DISTANCE_TOLERANCE) {
+                            driveStraight(0.9, rangeError);
                         } else {
-                            System.out.println("LOCK_SHOOTER -> TURN_BACK (range OK)");
                             currentState = AutoState.TURN_BACK;
                         }
                     }
                 } else {
-                    System.out.println("LOCK_SHOOTER -> SEARCH_SHOOTER (tag20 lost)");
                     currentState = AutoState.SEARCH_SHOOTER;
                 }
                 break;
 
             case TURN_BACK:
-                startRotateAction(180.0, 0.9, drive, () -> currentState = AutoState.SHOOTING);
+                rotateExactFast(-180.0, 0.9);
+                currentState = AutoState.SHOOTING;
                 break;
 
             case SHOOTING:
-                startShootAction(drive, () -> currentState = AutoState.COLLECT_BALLS);
+                stopDrive();
+                executeShoot(3);
+                currentState = AutoState.COLLECT_BALLS;
                 break;
 
             case COLLECT_BALLS:
-                startCollectSequence(drive);
+                runCollectSequence();
                 break;
         }
     }
 
-    private void startInitialSequence(DriveIO drive) {
-        startRotateAction(10.0, 1.0, drive,
-                () -> startDriveAction(70.0, 0.9, drive,
-                        () -> currentState = AutoState.SCAN_CENTER));
-    }
-
-    private void startCollectSequence(DriveIO drive) {
+    private void runCollectSequence() {
         ballBatchCount++;
         double driveDist = 55.0;
-        // if (ballBatchCount == 2) driveDist = 50.0;
-        // if (ballBatchCount >= 3) driveDist = 80.0;
 
-        final double distFinal = driveDist;
-        Runnable step8 = () -> startRotateAction(-45.0, 1.0, drive, () -> currentState = AutoState.SEARCH_SHOOTER);
-        Runnable step7 = () -> startDriveAction(distFinal, 0.8, drive, step8);
-        Runnable step6 = () -> startRotateAction(180.0, 1.0, drive, step7);
-        Runnable step5 = () -> startDriveAction(-120.0, 0.8, drive, step6);
-        Runnable step4 = () -> {
-            drive.collect(ballBatchCount);
-            // Maju cepat 50 inch dulu
-            startDriveAction(50.0, 0.8, drive, () -> {
-                // Lalu maju lambat 30 inch
-                startDriveAction(70.0, 0.3, drive, () -> {
-                    // Setelah drive selesai, mulai sleep 1 detik
-                    beginSleep(1.0, step5);
-                });
-            });
-        };
-        Runnable step3 = () -> startRotateAction(180.0, 1.0, drive, step4);
-        Runnable step2 = () -> startDriveAction(distFinal, 0.8, drive, step3);
-        Runnable step1 = () -> startRotateAction(79.2, 1.0, drive, step2);
+        rotateExactFast(-79.2, 1.0);
+        driveStraight(0.8, driveDist);
+        rotateExactFast(-180.0, 1.0);
 
-        startDriveAction(0.0, 0.3, drive, step1);
+        intakeDrive.setPower(1.0);
+        driveStraight(0.8, 50.0);
+        driveStraight(0.3, 70.0);
+        sleep(1000);
+        intakeDrive.setPower(0);
+
+        driveStraight(0.8, -120.0);
+        rotateExactFast(-180.0, 1.0);
+        driveStraight(0.8, driveDist);
+        rotateExactFast(45.0, 1.0);
+
+        currentState = AutoState.SEARCH_SHOOTER;
     }
 
-    private void startDriveAction(double inches, double power, DriveIO drive, Runnable onDone) {
-        double speed = Math.max(0.1, Math.abs(power)) * linearSpeedInPerSec;
-        double duration = Math.abs(inches) / speed;
-        drive.driveStraight(inches, power);
-        beginAction(duration, onDone);
-    }
+    void executeShoot(int count) {
+        double targetWheelRPM = 6000.0;
+        double motorRPM = targetWheelRPM / GEAR_RATIO;
+        double targetTPS = (motorRPM / 60.0) * SHOOTER_TICKS_PER_REV;
 
-    private void startRotateAction(double degrees, double power, DriveIO drive, Runnable onDone) {
-        double speed = Math.max(0.1, Math.abs(power)) * angularSpeedDegPerSec;
-        double duration = Math.abs(degrees) / speed;
-        drive.rotate(degrees, power);
-        beginAction(duration, onDone);
-    }
+        shooter.setVelocity(targetTPS);
+        angle.setPosition(0.3);
+        sleep(1000);
 
-    private void startShootAction(DriveIO drive, Runnable onDone) {
-        drive.shoot(3);
-        beginAction(2.0, onDone);
-    }
-
-    private void beginSleep(double durationSeconds, Runnable onDone) {
-        if (durationSeconds <= 0) {
-            if (onDone != null) onDone.run();
-            return;
+        for (int i = 0; i < count; i++) {
+            feeder.setPosition(0.4);
+            sleep(400);
+            feeder.setPosition(0.0);
+            sleep(800);
         }
-        sleepActive = true;
-        sleepTimer = durationSeconds;
-        onSleepComplete = onDone;
+        shooter.setVelocity(0);
     }
 
-    private void beginAction(double durationSeconds, Runnable onDone) {
-        if (durationSeconds <= 0) {
-            if (onDone != null) onDone.run();
-            return;
+    void rotateExactFast(double degrees, double pwr) {
+        int ticks = (int)(degrees * TICKS_PER_DEGREE);
+        moveRobot(ticks, -ticks, pwr);
+    }
+
+    void driveStraight(double pwr, double inch) {
+        int ticks = (int)(inch * TICKS_PER_INCH);
+        moveRobot(ticks, ticks, pwr);
+    }
+
+    void moveRobot(int leftTicks, int rightTicks, double pwr) {
+        leftDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        rightDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        leftDrive.setTargetPosition(leftTicks);
+        rightDrive.setTargetPosition(rightTicks);
+        leftDrive.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        rightDrive.setMode(DcMotor.RunMode.RUN_TO_POSITION);
+        leftDrive.setPower(pwr);
+        rightDrive.setPower(pwr);
+
+        shooter.setVelocityPIDFCoefficients(8.0, 0.0, 0.0, 20.0);
+
+        while (opModeIsActive() && (leftDrive.isBusy() || rightDrive.isBusy()) && gamepad1.left_bumper) {
+            idle();
         }
-        actionActive = true;
-        actionTimer = durationSeconds;
-        onActionComplete = onDone;
+        stopDrive();
+        leftDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        rightDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    }
+
+    void setDrivePower(double lp, double rp) {
+        leftDrive.setPower(lp);
+        rightDrive.setPower(rp);
+    }
+
+    void stopDrive() { setDrivePower(0, 0); }
+
+    void runManualControl() {
+        double drive = -gamepad1.left_stick_y;
+        double turn  = gamepad1.right_stick_x;
+        leftDrive.setPower(Range.clip(drive + turn, -1.0, 1.0));
+        rightDrive.setPower(Range.clip(drive - turn, -1.0, 1.0));
+
+        if (gamepad1.a) intakeDrive.setPower(1.0);
+        else if (gamepad1.b) intakeDrive.setPower(-1.0);
+        else intakeDrive.setPower(0);
+
+        if (gamepad1.right_trigger > 0.1) {
+            shooter.setVelocity((gamepad1.right_trigger * 6000.0 / 60.0) * 28);
+        } else {
+            shooter.setVelocity(0);
+        }
+    }
+
+    void initHardware() {
+        leftDrive = hardwareMap.get(DcMotor.class, "left_drive");
+        rightDrive = hardwareMap.get(DcMotor.class, "right_drive");
+        intakeDrive = hardwareMap.get(DcMotor.class, "intake_driver");
+        shooter = hardwareMap.get(DcMotorEx.class, "shooter_motor");
+        feeder = hardwareMap.get(Servo.class, "feeder");
+        angle = hardwareMap.get(Servo.class, "angle");
+        leftDrive.setDirection(DcMotor.Direction.FORWARD);
+        rightDrive.setDirection(DcMotor.Direction.REVERSE);
+        shooter.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+        shooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+    }
+
+    void initAprilTag() {
+        Position cameraPosition = new Position(DistanceUnit.INCH, 0, 0, 0, 0);
+        YawPitchRollAngles cameraOrientation = new YawPitchRollAngles(AngleUnit.DEGREES, 0, 0, 90, 0);
+
+        aprilTag = new AprilTagProcessor.Builder()
+                .setCameraPose(cameraPosition, cameraOrientation)
+                .build();
+
+        visionPortal = new VisionPortal.Builder()
+                .setCamera(hardwareMap.get(WebcamName.class, "Webcam 1"))
+                .addProcessor(aprilTag)
+                .build();
+
+        while (visionPortal.getCameraState() != VisionPortal.CameraState.STREAMING && !isStopRequested()) {
+            sleep(20);
+        }
+
+        sleep(500);
+
+        try {
+            ExposureControl exposureControl = visionPortal.getCameraControl(ExposureControl.class);
+            GainControl gainControl = visionPortal.getCameraControl(GainControl.class);
+
+            if (exposureControl != null && gainControl != null) {
+                exposureControl.setMode(ExposureControl.Mode.Manual);
+                sleep(50);
+                exposureControl.setExposure(15, TimeUnit.MILLISECONDS);
+                gainControl.setGain(100);
+            }
+        } catch (Exception e) {
+            telemetry.addLine("Camera error: " + e.getMessage());
+        }
+        telemetry.update();
+    }
+
+    AprilTagDetection getSpecificTag(int id) {
+        List<AprilTagDetection> detections = aprilTag.getDetections();
+        for (AprilTagDetection det : detections) {
+            if (det.metadata != null && det.id == id) return det;
+        }
+        return null;
+    }
+
+    void displayTelemetry(AprilTagDetection t21, AprilTagDetection t24) {
+        telemetry.addData("State", currentState);
+        telemetry.addData("Batches", ballBatchCount);
+        if (t21 != null) telemetry.addData("T21 Range", t21.ftcPose.range);
+        if (t24 != null) telemetry.addData("T24 Range", t24.ftcPose.range);
+        telemetry.update();
+    }
+
+    // Helper to get the first visible center tag (21, 22, 23)
+    private AprilTagDetection getCenterTag(AprilTagDetection tag21, AprilTagDetection tag22, AprilTagDetection tag23) {
+        if (tag21 != null) return tag21;
+        if (tag22 != null) return tag22;
+        if (tag23 != null) return tag23;
+        return null;
     }
 }

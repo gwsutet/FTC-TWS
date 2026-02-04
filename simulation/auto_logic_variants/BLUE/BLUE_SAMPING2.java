@@ -15,6 +15,8 @@ public class AutoLogic {
     // Dynamic shooting target based on scan
     private AprilTagIO shootingTarget = null;
 
+    private AprilTagIO centerTag = null;
+
     // Initial position settings
     private double initialX = 5.0;  // Starting X position
     private double initialY = -55.0;  // Starting Y position
@@ -70,6 +72,7 @@ public class AutoLogic {
     }
 
     public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag20, AprilTagIO tag24, DriveIO drive) {
+        centerTag = getCenterTag(tag21, tag20, tag24);
         if (actionActive) {
             actionTimer -= dtSeconds;
             if (actionTimer <= 0) {
@@ -103,14 +106,14 @@ public class AutoLogic {
                 break;
 
             case SCAN_CENTER:
-                if (tag21 != null && tag21.isVisible()) {
-                    // Ngehadap ke tag21 dulu
-                    double yawError = tag21.yaw();
+                if (centerTag != null && centerTag.isVisible()) {
+                    // Ngehadap ke center tag (21/22/23) dulu
+                    double yawError = centerTag.yaw();
                     if (Math.abs(yawError) > Math.toRadians(5)) {
                         drive.tank(0.25, -0.25);  // Putar clockwise (kanan) untuk ngehadap tag
                     } else {
                         drive.tank(0, 0);  // Stop kalo udah ngehadek
-                        double rangeError = tag21.range() - 60.0;  // Minimal 24 inch dari tag21
+                        double rangeError = centerTag.range() - 60.0;  // Minimal 24 inch dari center tag
                         if (Math.abs(rangeError) > distanceTolerance) {
                             startDriveAction(rangeError, 0.9, drive, null);
                         } else {
@@ -260,5 +263,13 @@ public class AutoLogic {
         actionActive = true;
         actionTimer = durationSeconds;
         onActionComplete = onDone;
+    }
+
+    // Helper to get the first visible center tag (21, 22, 23)
+    private AprilTagIO getCenterTag(AprilTagIO tag21, AprilTagIO tag22, AprilTagIO tag23) {
+        if (tag21 != null && tag21.isVisible()) return tag21;
+        if (tag22 != null && tag22.isVisible()) return tag22;
+        if (tag23 != null && tag23.isVisible()) return tag23;
+        return null;
     }
 }
