@@ -1,5 +1,4 @@
-public class AutoLogic {
-    public enum AutoState { IDLE, SCAN_CENTER, SEARCH_SHOOTER, LOCK_SHOOTER, TURN_BACK, SHOOTING, COLLECT_BALLS }
+public class RED_SAMPING1 extends AutoLogic {
 
     private AutoState currentState = AutoState.IDLE;
     private int ballBatchCount = 0;
@@ -14,6 +13,7 @@ public class AutoLogic {
     
     // Dynamic shooting target based on scan
     private AprilTagIO shootingTarget = null;
+    private AprilTagIO centerTag = null;
 
     // Initial position settings
     private double initialX = 5.0;  // Starting X position
@@ -39,6 +39,7 @@ public class AutoLogic {
         sleepActive = false;
         sleepTimer = 0.0;
         onSleepComplete = null;
+        autoTimer = 0.0;  // Reset 30-second timer
         shootingTarget = null;
     }
 
@@ -69,8 +70,21 @@ public class AutoLogic {
         }
     }
 
-    public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag20, AprilTagIO tag24, DriveIO drive) {
-        centerTag = getCenterTag(tag21, tag20, tag24); // Use tag21/tag22/tag23 as center, tag20 as fallback if available
+    public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag22, AprilTagIO tag23, AprilTagIO tag20, AprilTagIO tag24, DriveIO drive) {
+        // Track autonomous time and stop after 30 seconds
+        if (autoTimer < AUTO_TIME_LIMIT) {
+            autoTimer += dtSeconds;
+            if (autoTimer > AUTO_TIME_LIMIT) {
+                autoTimer = AUTO_TIME_LIMIT;  // Cap at exactly 30.0
+            }
+        }
+        if (autoTimer >= AUTO_TIME_LIMIT) {
+            drive.tank(0, 0);  // Stop all movement
+            currentState = AutoState.IDLE;
+            return;
+        }
+        
+        centerTag = getCenterTag(tag21, tag22, tag23); // TODO: add tag22/tag23 when available in simulator
         if (actionActive) {
             actionTimer -= dtSeconds;
             if (actionTimer <= 0) {
@@ -124,17 +138,14 @@ public class AutoLogic {
                 break;
 
             case SEARCH_SHOOTER:
-                // Cari tag24 atau tag20, yang pertama ketemu itu jadi target
+                // Cari tag24 sebagai target shooter
                 if (tag24 != null && tag24.isVisible()) {
                     shootingTarget = tag24;
                     System.out.println("RED Found tag24, using as shooting target");
-                } else if (tag20 != null && tag20.isVisible()) {
-                    shootingTarget = tag20;
-                    System.out.println("RED Found tag20, using as shooting target");
                 }
                 
                 if (shootingTarget != null && shootingTarget.isVisible()) {
-                    // Ngehadap ke target yang ditemukan
+                    // Ngehadap ke target
                     double yawError = shootingTarget.yaw();
                     if (Math.abs(yawError) > Math.toRadians(5)) {
                         drive.tank(0.3, -0.3);  // Putar counter-clockwise (kiri) untuk ngehadap tag
@@ -212,7 +223,7 @@ public class AutoLogic {
             // Maju cepat 50 inch dulu
             startDriveAction(50.0, 0.8, drive, () -> {
                 // Lalu maju lambat 30 inch
-                startDriveAction(70.0, 0.3, drive, () -> {
+                startDriveAction(70.0, 0.6, drive, () -> {
                     // Setelah drive selesai, mulai sleep 1 detik
                     beginSleep(1.0, step5);
                 });
@@ -262,5 +273,13 @@ public class AutoLogic {
         actionActive = true;
         actionTimer = durationSeconds;
         onActionComplete = onDone;
+    }
+
+    // Helper to get the first visible center tag (21, 22, 23)
+    private AprilTagIO getCenterTag(AprilTagIO tag21, AprilTagIO tag22, AprilTagIO tag23) {
+        if (tag21 != null && tag21.isVisible()) return tag21;
+        if (tag22 != null && tag22.isVisible()) return tag22;
+        if (tag23 != null && tag23.isVisible()) return tag23;
+        return null;
     }
 }

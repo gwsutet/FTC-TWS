@@ -3,9 +3,12 @@ import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.image.BufferedImage;
 import java.io.*;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.util.ArrayList;
 import java.util.List;
 import javax.imageio.ImageIO;
+import java.lang.reflect.Constructor;
 
 public class SimulatorWindow extends JFrame {
     private static final double FIELD_SIZE_IN = 144.0;
@@ -22,11 +25,20 @@ public class SimulatorWindow extends JFrame {
     private final SimAprilTag tag21 = tag5;  // tag5 di atas (y=72.0)
     private final SimAprilTag tag24 = tag6;  // tag24 pindah ke tag4 (kiri atas)
     private final SimAprilTag tag20 = tag4;  // tag20 sebagai alias ke tag4
+    
+    // Additional center tags (22, 23) at same position as tag21
+    private final SimAprilTag tag22 = new SimAprilTag(22, 0.0, 72.0);  // Same position as tag21
+    private final SimAprilTag tag23 = new SimAprilTag(23, 0.0, 72.0);  // Same position as tag21
+    
     private SimAprilTag controlTag = tag21;
 
     private final AutoLogic autoLogic = new AutoLogic();
     private boolean autoEnabled = false;
     private AutoLogic.AutoState lastState = autoLogic.getCurrentState();
+
+    // AutoLogic variants
+    private final JComboBox<String> autoLogicComboBox = new JComboBox<>();
+    private AutoLogic currentAutoLogic = autoLogic;
 
     private final List<double[]> trail = new ArrayList<>();
     private final List<String> recentTransitions = new ArrayList<>();
@@ -51,6 +63,114 @@ public class SimulatorWindow extends JFrame {
         }
     }
 
+    private void initAutoLogicVariants() {
+        // Add default AutoLogic
+        autoLogicComboBox.addItem("Default AutoLogic");
+        
+        // Add variants from auto_logic_variants folder
+        File variantsDir = new File("auto_logic_variants");
+        if (variantsDir.exists() && variantsDir.isDirectory()) {
+            addAutoLogicVariantsFromDirectory(variantsDir);
+        }
+        
+        autoLogicComboBox.addActionListener(e -> switchAutoLogic());
+    }
+
+    private void addAutoLogicVariantsFromDirectory(File dir) {
+        File[] subdirs = dir.listFiles(File::isDirectory);
+        if (subdirs != null) {
+            for (File subdir : subdirs) {
+                addAutoLogicVariantsFromSubdirectory(subdir);
+            }
+        }
+    }
+
+    private void addAutoLogicVariantsFromSubdirectory(File subdir) {
+        File[] javaFiles = subdir.listFiles((d, name) -> name.endsWith(".java"));
+        if (javaFiles != null) {
+            for (File javaFile : javaFiles) {
+                String className = javaFile.getName().replace(".java", "");
+                autoLogicComboBox.addItem(subdir.getName() + "/" + className);
+            }
+        }
+    }
+
+    private void switchAutoLogic() {
+        String selected = (String) autoLogicComboBox.getSelectedItem();
+        if (selected == null) return;
+        
+        // Stop autonomous when switching variants to ensure timer resets
+        autoEnabled = false;
+        drive.stop();
+        
+        System.out.println("Switching to AutoLogic variant: " + selected);
+        
+        if (selected.equals("Default AutoLogic")) {
+            currentAutoLogic = autoLogic;
+            System.out.println("Using Default AutoLogic");
+        } else {
+            try {
+                // Parse path like "BLUE/BLUE_AUTO_FAR"
+                String[] parts = selected.split("/");
+                String folderName = parts[0]; // "BLUE" atau "RED"
+                String fileName = parts[1]; // "BLUE_AUTO_FAR"
+                
+                System.out.println("Recompiling variant: " + folderName + "/" + fileName);
+                
+                // Clear and recreate variant directory to ensure fresh compilation
+                String variantDir = "bin_" + folderName.toLowerCase();
+                File variantDirFile = new File(variantDir);
+                if (variantDirFile.exists()) {
+                    // Delete old class files
+                    File[] oldFiles = variantDirFile.listFiles();
+                    if (oldFiles != null) {
+                        for (File f : oldFiles) {
+                            f.delete();
+                        }
+                    }
+                }
+                variantDirFile.mkdirs();
+                
+                Process compileProcess = new ProcessBuilder(
+                    "javac", "-d", variantDir, "-sourcepath", "src", "-cp", "bin",
+                    "auto_logic_variants/" + folderName + "/" + fileName + ".java"
+                ).directory(new File("s:\\FTC\\simulation")).inheritIO().start();
+                
+                int exitCode = compileProcess.waitFor();
+                if (exitCode != 0) {
+                    System.err.println("Compilation failed for: " + selected);
+                    currentAutoLogic = autoLogic;
+                    return;
+                }
+                
+                // Load the newly compiled class by its unique name
+                URLClassLoader variantLoader = new URLClassLoader(
+                    new URL[] { new File(variantDir).toURI().toURL() },
+                    this.getClass().getClassLoader()
+                );
+                
+                // Load class by its unique name (e.g., BLUE_AUTO_FAR, RED_SAMPING1)
+                Class<?> clazz = variantLoader.loadClass(fileName);
+                Constructor<?> constructor = clazz.getConstructor();
+                currentAutoLogic = (AutoLogic) constructor.newInstance();
+                
+                System.out.println("Successfully loaded class: " + currentAutoLogic.getClass().getName());
+                System.out.println("Class hash: " + System.identityHashCode(currentAutoLogic));
+                System.out.println("Variant: " + selected);
+            } catch (Exception e) {
+                System.err.println("Failed to load AutoLogic variant: " + selected + " - " + e.getMessage());
+                e.printStackTrace();
+                currentAutoLogic = autoLogic; // Fallback to default
+            }
+        }
+        
+        // Reset the new AutoLogic
+        currentAutoLogic.reset();
+        lastState = currentAutoLogic.getCurrentState();
+        trail.clear();
+        repaint();
+    }
+
     public SimulatorWindow() {
         super("FTC Autonomous Simulator");
         setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
@@ -67,6 +187,7 @@ public class SimulatorWindow extends JFrame {
 
         loadDefaultFieldImage();
         loadSavedPositions();
+        initAutoLogicVariants();  // Initialize AutoLogic variants
         buildControls();
         buildInfoPanel();
         applyStartPose(); // initialize robot pose from defaults
@@ -88,7 +209,7 @@ public class SimulatorWindow extends JFrame {
             public void actionPerformed(ActionEvent e) {
                 autoEnabled = !autoEnabled;
                 if (autoEnabled) {
-                    autoLogic.reset();
+                    currentAutoLogic.reset();
                 } else {
                     drive.stop();
                 }
@@ -106,22 +227,42 @@ public class SimulatorWindow extends JFrame {
             }
         });
 
-        im.put(KeyStroke.getKeyStroke("2"), "toggleTag24");
-        am.put("toggleTag24", new AbstractAction() {
+        im.put(KeyStroke.getKeyStroke("2"), "toggleTag22");
+        am.put("toggleTag22", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
-                tag24.toggleVisible();
-                controlTag = tag24;
+                tag22.toggleVisible();
+                controlTag = tag22;
                 repaint();
             }
         });
 
-        im.put(KeyStroke.getKeyStroke("3"), "toggleTag20");
+        im.put(KeyStroke.getKeyStroke("3"), "toggleTag23");
+        am.put("toggleTag23", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                tag23.toggleVisible();
+                controlTag = tag23;
+                repaint();
+            }
+        });
+
+        im.put(KeyStroke.getKeyStroke("4"), "toggleTag20");
         am.put("toggleTag20", new AbstractAction() {
             @Override
             public void actionPerformed(ActionEvent e) {
                 tag20.toggleVisible();
                 controlTag = tag20;
+                repaint();
+            }
+        });
+
+        im.put(KeyStroke.getKeyStroke("5"), "toggleTag24");
+        am.put("toggleTag24", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
+                tag24.toggleVisible();
+                controlTag = tag24;
                 repaint();
             }
         });
@@ -166,14 +307,14 @@ public class SimulatorWindow extends JFrame {
     private void tick(ActionEvent e) {
         double dt = 0.02;
         if (autoEnabled) {
-            autoLogic.update(dt, tag21, tag20, tag24, drive);
+            currentAutoLogic.update(dt, tag21, tag22, tag23, tag20, tag24, drive);
         }
         drive.update(dt);
         SimDrive.Pose p = drive.getPose();
         trail.add(new double[]{p.x, p.y});
         if (trail.size() > 2000) trail.remove(0);
 
-        AutoLogic.AutoState current = autoLogic.getCurrentState();
+        AutoLogic.AutoState current = currentAutoLogic.getCurrentState();
         if (current != lastState) {
             recentTransitions.add(0, String.format("%s -> %s", lastState, current));
             if (recentTransitions.size() > 6) recentTransitions.remove(recentTransitions.size() - 1);
@@ -185,6 +326,12 @@ public class SimulatorWindow extends JFrame {
 
     private void buildControls() {
         controlPanel.setLayout(new BoxLayout(controlPanel, BoxLayout.Y_AXIS));
+        
+        // First row - AutoLogic selection
+        JPanel row0 = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        row0.add(new JLabel("AutoLogic:"));
+        row0.add(autoLogicComboBox);
+        controlPanel.add(row0);
         
         // First row - Start position controls
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -264,7 +411,7 @@ public class SimulatorWindow extends JFrame {
             double headingDeg = Double.parseDouble(startHeadingField.getText());
             drive.setPose(x, y, Math.toRadians(headingDeg));
             trail.clear();
-            autoLogic.reset();
+            currentAutoLogic.reset();
             repaint();
         } catch (NumberFormatException ex) {
             JOptionPane.showMessageDialog(this, "Invalid start pose numbers", "Input Error", JOptionPane.ERROR_MESSAGE);
@@ -335,6 +482,8 @@ public class SimulatorWindow extends JFrame {
         drawTag(g2, tag4, new Color(255, 120, 120));
         drawTag(g2, tag5, new Color(160, 120, 255));
         drawTag(g2, tag6, new Color(220, 200, 120));
+        drawTag(g2, tag22, new Color(120, 255, 120));  // Green for tag22
+        drawTag(g2, tag23, new Color(255, 200, 80));   // Orange for tag23
     }
 
     private void drawTag(Graphics2D g2, SimAprilTag tag, Color color) {
@@ -394,12 +543,21 @@ public class SimulatorWindow extends JFrame {
     private void updateHudText() {
         SimDrive.Pose p = drive.getPose();
         StringBuilder sb = new StringBuilder();
-        sb.append(String.format("Auto: %s\nState: %s\n", autoEnabled ? "ENABLED" : "DISABLED", autoLogic.getCurrentState().name()));
+        String currentVariant = (String) autoLogicComboBox.getSelectedItem();
+        double timer = currentAutoLogic.getAutoTimer();
+        double remaining = Math.max(0, 30.0 - timer);
+        sb.append(String.format("Auto: %s | Timer: %.1f/30.0s\nVariant: %s\nState: %s\n", 
+            autoEnabled ? "ENABLED" : "DISABLED", 
+            timer,
+            currentVariant != null ? currentVariant : "Unknown",
+            currentAutoLogic.getCurrentState().name()));
         sb.append(String.format("Pose: x=%.1f in, y=%.1f in, heading=%.1f deg\n", p.x, p.y, Math.toDegrees(p.headingRad)));
         sb.append(String.format("Tag21 vis=%s yaw=%.2f rad r=%.1f\n", tag21.isVisible(), tag21.yaw(), tag21.range()));
-        sb.append(String.format("Tag24 vis=%s yaw=%.2f rad r=%.1f\n", tag24.isVisible(), tag24.yaw(), tag24.range()));
+        sb.append(String.format("Tag22 vis=%s yaw=%.2f rad r=%.1f\n", tag22.isVisible(), tag22.yaw(), tag22.range()));
+        sb.append(String.format("Tag23 vis=%s yaw=%.2f rad r=%.1f\n", tag23.isVisible(), tag23.yaw(), tag23.range()));
         sb.append(String.format("Tag20 vis=%s yaw=%.2f rad r=%.1f\n", tag20.isVisible(), tag20.yaw(), tag20.range()));
-        sb.append("Controls: ENTER auto | 1 Tag21 | 2 Tag24 | 3 Tag20 | Q/E yaw | W/S range | Set Pose button\n");
+        sb.append(String.format("Tag24 vis=%s yaw=%.2f rad r=%.1f\n", tag24.isVisible(), tag24.yaw(), tag24.range()));
+        sb.append("Controls: ENTER auto | 1 Tag21 | 2 Tag22 | 3 Tag23 | 4 Tag20 | 5 Tag24 | Q/E yaw | W/S range | Set Pose button\n");
         sb.append("\nRecent state transitions:\n");
         for (String s : recentTransitions) {
             sb.append(s).append("\n");
@@ -435,7 +593,7 @@ public class SimulatorWindow extends JFrame {
             startYField.setText(String.format("%.1f", selected.getY()));
             startHeadingField.setText(String.format("%.1f", selected.getHeading()));
             trail.clear();
-            autoLogic.reset();
+            currentAutoLogic.reset();
             repaint();
             JOptionPane.showMessageDialog(this, "Position loaded: " + selected, "Success", JOptionPane.INFORMATION_MESSAGE);
         }
