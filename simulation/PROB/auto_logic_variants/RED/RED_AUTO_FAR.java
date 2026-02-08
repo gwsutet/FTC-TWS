@@ -39,7 +39,7 @@ public class RED_AUTO_FAR extends AutoLogic {
         sleepActive = false;
         sleepTimer = 0.0;
         onSleepComplete = null;
-        autoTimer = 0.0;  // Reset 30-second timer
+        // autoTimer = 0.0;  // Reset 30-second timer
     }
 
     // Set initial position for simulation
@@ -70,18 +70,6 @@ public class RED_AUTO_FAR extends AutoLogic {
     }
 
     public void update(double dtSeconds, AprilTagIO tag21, AprilTagIO tag22, AprilTagIO tag23, AprilTagIO tag20, AprilTagIO tag24, DriveIO drive) {
-        // Track autonomous time and stop after 30 seconds
-        if (autoTimer < AUTO_TIME_LIMIT) {
-            autoTimer += dtSeconds;
-            if (autoTimer > AUTO_TIME_LIMIT) {
-                autoTimer = AUTO_TIME_LIMIT;  // Cap at exactly 30.0
-            }
-        }
-        if (autoTimer >= AUTO_TIME_LIMIT) {
-            drive.tank(0, 0);  // Stop all movement
-            currentState = AutoState.IDLE;
-            return;
-        }
         
         centerTag = getCenterTag(tag21, tag22, tag23); // Use tag21/tag22/tag23 as center, tag20 as fallback if available
         if (actionActive) {

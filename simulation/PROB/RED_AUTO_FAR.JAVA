@@ -54,17 +54,10 @@ public class RED_AUTO_FAR extends LinearOpMode {
         waitForStart();
 
         while (opModeIsActive()) {
-            AprilTagDetection tag21 = getSpecificTag(21);
+            AprilTagDetection tag21 = getSpecificTag(23);
             AprilTagDetection tag24 = getSpecificTag(24);
-
-            if (gamepad1.left_bumper) {
-                runAutoLogic(tag21, tag24);
-            } else {
-                currentState = AutoState.IDLE;
-                stopDrive();
-                runManualControl();
-            }
-
+            
+            runAutoLogic(tag21, tag24);
             displayTelemetry(tag21, tag24);
         }
     }
@@ -213,9 +206,6 @@ public class RED_AUTO_FAR extends LinearOpMode {
 
         shooter.setVelocityPIDFCoefficients(8.0, 0.0, 0.0, 20.0);
 
-        while (opModeIsActive() && (leftDrive.isBusy() || rightDrive.isBusy()) && gamepad1.left_bumper) {
-            idle();
-        }
         stopDrive();
         leftDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         rightDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -260,7 +250,7 @@ public class RED_AUTO_FAR extends LinearOpMode {
 
     void initAprilTag() {
         Position cameraPosition = new Position(DistanceUnit.INCH, 0, 0, 0, 0);
-        YawPitchRollAngles cameraOrientation = new YawPitchRollAngles(AngleUnit.DEGREES, 0, 0, 90, 0);
+        YawPitchRollAngles cameraOrientation = new YawPitchRollAngles(AngleUnit.DEGREES, 0, 90, 0, 0);
 
         aprilTag = new AprilTagProcessor.Builder()
                 .setCameraPose(cameraPosition, cameraOrientation)

@@ -1,7 +1,7 @@
 package org.firstinspires.ftc.teamcode;
 
-import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
 import com.qualcomm.robotcore.hardware.Servo;
@@ -19,15 +19,18 @@ import org.firstinspires.ftc.vision.apriltag.AprilTagDetection;
 import org.firstinspires.ftc.vision.apriltag.AprilTagProcessor;
 
 import java.util.List;
+import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-@Autonomous(name = "AutoLogic Real - Red Far V2", group = "Red")
-public class RED_SAMPING2 extends LinearOpMode {
+@Autonomous(name = "AutoLogic Real - Red Far (FIXED)", group = "Red")
+public class RED_AUTO_FAR_FIX1 extends LinearOpMode {
 
     enum AutoState { IDLE, SCAN_CENTER, SEARCH_SHOOTER, LOCK_SHOOTER, TURN_BACK, SHOOTING, COLLECT_BALLS }
 
     private AutoState currentState = AutoState.IDLE;
     private int ballBatchCount = 0;
+    static final int MAX_BALL_BATCHES = 3;
+    Random random = new Random();
 
     private DcMotor leftDrive, rightDrive, intakeDrive;
     private DcMotorEx shooter;
@@ -49,24 +52,15 @@ public class RED_SAMPING2 extends LinearOpMode {
     public void runOpMode() {
         initHardware();
         initAprilTag();
-
-        telemetry.addData("Status", "Ready");
         telemetry.update();
 
         waitForStart();
 
         while (opModeIsActive()) {
-            AprilTagDetection tag21 = getSpecificTag(21);
+            AprilTagDetection tag21 = getSpecificTag(23);
             AprilTagDetection tag24 = getSpecificTag(24);
-
-            if (gamepad1.left_bumper) {
-                runAutoLogic(tag21, tag24);
-            } else {
-                currentState = AutoState.IDLE;
-                stopDrive();
-                runManualControl();
-            }
-
+            
+            runAutoLogic(tag21, tag24);
             displayTelemetry(tag21, tag24);
         }
     }
@@ -74,25 +68,30 @@ public class RED_SAMPING2 extends LinearOpMode {
     void runAutoLogic(AprilTagDetection tag21, AprilTagDetection tag24) {
         AprilTagDetection tag22 = getSpecificTag(22);
         AprilTagDetection tag23 = getSpecificTag(23);
-        AprilTagDetection centerTag = getCenterTag(tag21, tag22, tag23);
+        AprilTagDetection centerTag = getRandomCenterTag(tag21, tag22, tag23);
 
         switch (currentState) {
             case IDLE:
-                driveStraight(0.9, -80.0);
-                rotateExactFast(-90.0, 1.0);
-                driveStraight(0.9, -90.0);
+                angle.setPosition(0.4);
+                feeder.setPosition(0.0);  
+                rotateExactFast(-40.0, 1.0);
+                driveStraight(0.9, 40.0);
                 currentState = AutoState.SCAN_CENTER;
                 break;
 
             case SCAN_CENTER:
                 if (centerTag != null) {
-                    double bearing = centerTag.ftcPose.bearing;
-                    if (Math.abs(bearing) > 5.0) {
+                    double yawError = centerTag.ftcPose.bearing;
+                    if (Math.abs(yawError) > 5.0) {
                         setDrivePower(-0.25, 0.25);
                     } else {
-                        double rangeErr = centerTag.ftcPose.range - 60.0;
-                        if (Math.abs(rangeErr) > DISTANCE_TOLERANCE) driveStraight(0.9, rangeErr);
-                        else currentState = AutoState.SEARCH_SHOOTER;
+                        stopDrive();
+                        double rangeError = centerTag.ftcPose.range - 60.0;
+                        if (Math.abs(rangeError) > DISTANCE_TOLERANCE) {
+                            driveStraight(0.9, rangeError);
+                        } else {
+                            currentState = AutoState.SEARCH_SHOOTER;
+                        }
                     }
                 } else {
                     setDrivePower(-0.18, 0.18);
@@ -101,8 +100,8 @@ public class RED_SAMPING2 extends LinearOpMode {
 
             case SEARCH_SHOOTER:
                 if (tag24 != null) {
-                    double bearing = tag24.ftcPose.bearing;
-                    if (Math.abs(bearing) > 5.0) {
+                    double yawError = tag24.ftcPose.bearing;
+                    if (Math.abs(yawError) > 5.0) {
                         setDrivePower(0.3, -0.3);
                     } else {
                         stopDrive();
@@ -114,19 +113,20 @@ public class RED_SAMPING2 extends LinearOpMode {
                 break;
 
             case LOCK_SHOOTER:
-                if (tag24 == null) {
-                    currentState = AutoState.SEARCH_SHOOTER;
-                } else {
-                    double bearing = tag24.ftcPose.bearing;
-                    double rangeErr = tag24.ftcPose.range - 68.0;
-
-                    if (Math.abs(bearing) > 3.0) {
+                if (tag24 != null) {
+                    double yawError = tag24.ftcPose.bearing;
+                    if (Math.abs(yawError) > 3.0) {
                         setDrivePower(0.25, -0.25);
-                    } else if (Math.abs(rangeErr) > DISTANCE_TOLERANCE) {
-                        driveStraight(0.9, rangeErr);
                     } else {
-                        currentState = AutoState.TURN_BACK;
+                        double rangeError = tag24.ftcPose.range - 68.0;
+                        if (Math.abs(rangeError) > DISTANCE_TOLERANCE) {
+                            driveStraight(0.9, rangeError);
+                        } else {
+                            currentState = AutoState.TURN_BACK;
+                        }
                     }
+                } else {
+                    currentState = AutoState.SEARCH_SHOOTER;
                 }
                 break;
 
@@ -136,6 +136,7 @@ public class RED_SAMPING2 extends LinearOpMode {
                 break;
 
             case SHOOTING:
+                stopDrive();
                 executeShoot(3);
                 currentState = AutoState.COLLECT_BALLS;
                 break;
@@ -148,10 +149,10 @@ public class RED_SAMPING2 extends LinearOpMode {
 
     private void runCollectSequence() {
         ballBatchCount++;
-        double distFinal = 55.0;
+        double driveDist = 55.0;
 
         rotateExactFast(-79.2, 1.0);
-        driveStraight(0.8, distFinal);
+        driveStraight(0.8, driveDist);
         rotateExactFast(-180.0, 1.0);
 
         intakeDrive.setPower(1.0);
@@ -162,7 +163,7 @@ public class RED_SAMPING2 extends LinearOpMode {
 
         driveStraight(0.8, -120.0);
         rotateExactFast(-180.0, 1.0);
-        driveStraight(0.8, distFinal);
+        driveStraight(0.8, driveDist);
         rotateExactFast(45.0, 1.0);
 
         currentState = AutoState.SEARCH_SHOOTER;
@@ -196,6 +197,10 @@ public class RED_SAMPING2 extends LinearOpMode {
         moveRobot(ticks, ticks, pwr);
     }
 
+    /**
+     * FIX: Added while loop to wait for motors to reach target position
+     * The original code was missing this, causing motors to stop immediately
+     */
     void moveRobot(int leftTicks, int rightTicks, double pwr) {
         leftDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
         rightDrive.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
@@ -206,9 +211,11 @@ public class RED_SAMPING2 extends LinearOpMode {
         leftDrive.setPower(pwr);
         rightDrive.setPower(pwr);
 
-        while (opModeIsActive() && (leftDrive.isBusy() || rightDrive.isBusy()) && gamepad1.left_bumper) {
+        // FIX: Wait for motors to reach target - THIS WAS MISSING!
+        while (opModeIsActive() && (leftDrive.isBusy() || rightDrive.isBusy())) {
             idle();
         }
+
         stopDrive();
         leftDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         rightDrive.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
@@ -226,6 +233,16 @@ public class RED_SAMPING2 extends LinearOpMode {
         double turn  = gamepad1.right_stick_x;
         leftDrive.setPower(Range.clip(drive + turn, -1.0, 1.0));
         rightDrive.setPower(Range.clip(drive - turn, -1.0, 1.0));
+
+        if (gamepad1.a) intakeDrive.setPower(1.0);
+        else if (gamepad1.b) intakeDrive.setPower(-1.0);
+        else intakeDrive.setPower(0);
+
+        if (gamepad1.right_trigger > 0.1) {
+            shooter.setVelocity((gamepad1.right_trigger * 6000.0 / 60.0) * 28);
+        } else {
+            shooter.setVelocity(0);
+        }
     }
 
     void initHardware() {
@@ -243,7 +260,7 @@ public class RED_SAMPING2 extends LinearOpMode {
 
     void initAprilTag() {
         Position cameraPosition = new Position(DistanceUnit.INCH, 0, 0, 0, 0);
-        YawPitchRollAngles cameraOrientation = new YawPitchRollAngles(AngleUnit.DEGREES, 0, 0, 90, 0);
+        YawPitchRollAngles cameraOrientation = new YawPitchRollAngles(AngleUnit.DEGREES, 0, 90, 0, 0);
 
         aprilTag = new AprilTagProcessor.Builder()
                 .setCameraPose(cameraPosition, cameraOrientation)
@@ -292,11 +309,13 @@ public class RED_SAMPING2 extends LinearOpMode {
         telemetry.update();
     }
 
-    // Helper to get the first visible center tag (21, 22, 23)
-    private AprilTagDetection getCenterTag(AprilTagDetection tag21, AprilTagDetection tag22, AprilTagDetection tag23) {
-        if (tag21 != null) return tag21;
-        if (tag22 != null) return tag22;
-        if (tag23 != null) return tag23;
-        return null;
+    private AprilTagDetection getRandomCenterTag(AprilTagDetection tag21, AprilTagDetection tag22, AprilTagDetection tag23) {
+        List<AprilTagDetection> availableTags = new java.util.ArrayList<>();
+        if (tag21 != null) availableTags.add(tag21);
+        if (tag22 != null) availableTags.add(tag22);
+        if (tag23 != null) availableTags.add(tag23);
+        
+        if (availableTags.isEmpty()) return null;
+        return availableTags.get(random.nextInt(availableTags.size()));
     }
 }
